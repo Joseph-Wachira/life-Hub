@@ -6,3 +6,13 @@ export const createWorkspaceSchema = z.object({
 });
 
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
+
+export const updateWorkspaceSchema = z.object({
+  name: z.string().trim().min(2, "Name your workspace").max(60),
+  color: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Pick a valid color"),
+});
+
+export type UpdateWorkspaceInput = z.infer<typeof updateWorkspaceSchema>;

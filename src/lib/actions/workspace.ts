@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { createWorkspaceSchema } from "@/lib/validations/workspace";
+import { createWorkspaceSchema, updateWorkspaceSchema } from "@/lib/validations/workspace";
+import { deleteWorkspace, setDefaultWorkspace, updateWorkspace } from "@/lib/services/workspace";
 import { ACTIVE_WORKSPACE_COOKIE } from "@/lib/constants/cookies";
 import type { ActionResult } from "@/lib/actions/auth";
 
@@ -58,5 +59,66 @@ export async function createWorkspaceAction(
   });
 
   revalidatePath("/", "layout");
+  return { success: true };
+}
+
+export async function updateWorkspaceAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) redirect("/login");
+
+  const parsed = updateWorkspaceSchema.safeParse({
+    name: formData.get("name"),
+    color: formData.get("color"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Please check your details." };
+  }
+
+  const workspaceId = String(formData.get("workspaceId") ?? "");
+  try {
+    await updateWorkspace(session.user.id, workspaceId, parsed.data);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not update workspace." };
+  }
+
+  revalidatePath("/", "layout");
+  revalidatePath("/settings");
+  return { success: true };
+}
+
+export async function setDefaultWorkspaceAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user?.id) redirect("/login");
+
+  const workspaceId = String(formData.get("workspaceId") ?? "");
+  try {
+    await setDefaultWorkspace(session.user.id, workspaceId);
+  } catch {
+    return;
+  }
+
+  revalidatePath("/", "layout");
+  revalidatePath("/settings");
+}
+
+export async function deleteWorkspaceAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) redirect("/login");
+
+  const workspaceId = String(formData.get("workspaceId") ?? "");
+  try {
+    await deleteWorkspace(session.user.id, workspaceId);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not delete workspace." };
+  }
+
+  revalidatePath("/", "layout");
+  revalidatePath("/settings");
   return { success: true };
 }
