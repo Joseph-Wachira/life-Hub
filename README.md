@@ -1,36 +1,181 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Life Hub
 
-## Getting Started
+Life Hub is an all-in-one personal operating system: calendar, tasks & projects, goals, focus sessions, personal finance, notes, habits, and wellbeing — in one calm, premium workspace that adapts to students, employees, freelancers, entrepreneurs, and families alike.
 
-First, run the development server:
+This is a complete, working full-stack application — not a mockup. Every module reads and writes real data through a typed Prisma/SQLite database behind authenticated, workspace-scoped server actions.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Table of contents
+
+- [Stack](#stack)
+- [Architecture](#architecture)
+- [Data model](#data-model)
+- [Getting started](#getting-started)
+- [Environment variables](#environment-variables)
+- [Demo account & seed data](#demo-account--seed-data)
+- [Testing](#testing)
+- [Project structure](#project-structure)
+- [Known trade-offs & what's next](#known-trade-offs--whats-next)
+- [Deployment](#deployment)
+
+## Stack
+
+| Layer | Choice | Why |
+| --- | --- | --- |
+| Framework | Next.js 16 (App Router, Turbopack) | Server Components + Server Actions give one coherent mental model for data fetching *and* mutation, no separate REST/GraphQL layer to maintain. |
+| Language | TypeScript | End-to-end type safety from the database to the UI. |
+| Database | SQLite via Prisma ORM | Zero-config local dev with a real relational schema; the schema deliberately avoids SQLite-only features so switching `DATABASE_URL` to Postgres/MySQL needs no model changes. |
+| Auth | Auth.js (NextAuth v5) — Credentials provider + Prisma adapter, JWT sessions | Credentials auth requires JWT sessions in Auth.js; the Prisma adapter still gives us typed `User`/`Account`/`Session` tables ready for OAuth providers later. |
+| Validation | Zod | Every server action validates its `FormData` with a schema in `lib/validations/*` before touching the database. |
+| Styling | Tailwind CSS v4 (CSS-first config) | Design tokens live as CSS custom properties in `src/app/globals.css`, themeable for light/dark with zero JS-side color logic. |
+| Components | Hand-built on Radix UI primitives | Full control over the design system (see [Design system](#design-system)) rather than a black-box component library. |
+| Data fetching | Server Components + Server Actions; TanStack Query only where a client needs its own polling/cache (e.g. the notification bell) | Keeps most pages simple `async function Page()` reads with no client-side loading state to manage. |
+| Charts | Recharts | Spending breakdown, focus minutes, mood/sleep/water trends. |
+| Drag & drop | @dnd-kit (task board), native HTML5 DnD (calendar grid) | dnd-kit's sortable primitives fit a kanban board well; a calendar grid with many small per-cell drop targets was simpler and lighter with native DnD. |
+| Markdown | react-markdown + remark-gfm | Notes support GitHub-flavored markdown (tables, checklists) in preview. |
+| Testing | Vitest + Testing Library; Playwright (ad hoc, see below) | Pure-logic unit tests for the trickiest parts of each module; a scripted Playwright pass was used to verify the live app end-to-end during development. |
+
+## Architecture
+
+**Everything is workspace-scoped.** A signed-in user can have multiple *workspaces* (Personal, Work, School, Family, Side Project — see onboarding). Every domain table (`Task`, `Event`, `Transaction`, `Note`, `Habit`, …) has a `workspaceId` foreign key, and every query is filtered by it. The active workspace is resolved once, in `src/lib/session.ts`:
+
+```ts
+const { userId, user, workspace, workspaces } = await requireWorkspace();
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+This one call: confirms the user is signed in (redirecting to `/login` if not), resolves which workspace is "active" (from a cookie, falling back to the user's default), and redirects to `/onboarding` if the user has none yet. Every protected page and server action starts here.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Data flow, consistently, everywhere:**
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+page.tsx (Server Component)
+   -> lib/services/<module>.ts   (plain async functions, pure data access, no auth logic)
+   -> Prisma -> SQLite
 
-## Learn More
+Client interaction (form submit / button click)
+   -> lib/actions/<module>.ts ("use server"; validates with lib/validations/<module>.ts, calls the service, revalidates the route)
+```
 
-To learn more about Next.js, take a look at the following resources:
+Forms follow one pattern throughout the app: a client component calls `useActionState(someAction, null)` from `react`, renders a `<form action={formAction}>`, and a submit button reads `useFormStatus()` for its pending state. The action returns `{ error: string } | { success: true }` (the shared `ActionResult` type). This is the same pattern used for login, registration, onboarding, and every module's create/edit dialogs — one idiom to learn, reused everywhere.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Auth & route protection** is two-layered:
+- `src/proxy.ts` (Next.js 16 renamed `middleware.ts` to `proxy.ts` — see [Known trade-offs](#known-trade-offs--whats-next)) does a cheap JWT-only check and redirects unauthenticated users away from protected routes, and signed-in users away from `/login`/`/register`/`/`.
+- `src/app/(app)/layout.tsx` does the heavier check — onboarding completion, workspace resolution — since it runs in the Node.js runtime and can safely query Prisma.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Design system
 
-## Deploy on Vercel
+Design tokens are CSS custom properties (`--brand`, `--surface`, `--radius-md`, `--shadow-sm`, …) defined once in `src/app/globals.css` and consumed via Tailwind v4's `@theme inline` block, so `bg-[var(--surface)]` resolves through the token, not a hardcoded value. Dark mode is `next-themes` toggling a `data-theme` attribute; every token has a light and dark definition. The component kit (`src/components/ui/*`) wraps Radix primitives (Dialog, DropdownMenu, Select, Tabs, Tooltip, Popover, Checkbox, Switch, …) plus a few hand-built pieces (`EmptyState`, `ErrorState`, `StatCard`, `Skeleton`) — every list view in the app uses these three for its zero-items, error, and loading states.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Data model
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The full schema lives in [`prisma/schema.prisma`](prisma/schema.prisma). Highlights:
+
+- **Auth**: `User`, `Account`, `Session`, `VerificationToken` (Auth.js Prisma adapter shape) plus `OnboardingProfile`, `UserSettings`, `NotificationPreference`.
+- **Workspaces**: `Workspace` (typed Personal/Work/School/Family/Side-Project), owning nearly every other table.
+- **Calendar**: `Event`, with a JSON-encoded recurrence rule (`{freq, interval, byWeekday?, until?}`) expanded on demand by a pure, unit-tested `expandRecurrence()` function rather than exploding into per-occurrence rows.
+- **Tasks & projects**: `Task` (self-referencing for subtasks via `parentTaskId`), `Project`, `Tag` (many-to-many with both tasks and notes), `Attachment` (URL-based link attachments, not binary uploads — see trade-offs).
+- **Goals**: `Goal` + `Milestone`; progress is computed, not stored (milestones-complete ratio, falling back to linked-tasks-complete ratio).
+- **Focus**: `FocusSession` (Pomodoro/deep-work/custom), durations configurable per-user via `UserSettings`.
+- **Finance**: `Transaction`, `Category`, `Budget`, `RecurringBill`, `SavingsGoal` — all money stored as **integer cents** to avoid floating-point drift.
+- **Notes**: `Note` (markdown content, optional `NoteFolder` nesting, optional `Project` link), `NoteChecklistItem`.
+- **Habits & wellbeing**: `Habit` (JSON-encoded active days-of-week), `HabitLog`, `MoodCheckIn`, `WellbeingLog` (sleep/exercise/water).
+- **Notifications**: `Notification` + `NotificationPreference`, described below.
+
+## Getting started
+
+```bash
+git clone <this-repo>
+cd lifehub                    # or wherever you cloned it
+npm install
+cp .env.example .env          # then set AUTH_SECRET — see below
+npx prisma migrate deploy     # applies the committed migration history, creating prisma/dev.db
+npm run db:seed               # populates it with a realistic demo account
+npm run dev                   # http://localhost:3000
+```
+
+(If you'd rather start from a blank database and iterate on the schema yourself, use `npx prisma migrate dev` instead of `deploy`.)
+
+Sign in with the seeded demo account (below), or register a new account and go through onboarding yourself.
+
+## Environment variables
+
+See [`.env.example`](.env.example) for the full list with comments. Summary:
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | Yes | `file:./dev.db` for local SQLite. Point at a Postgres/MySQL connection string in production — no schema changes needed. |
+| `AUTH_SECRET` | Yes | Session encryption key for Auth.js. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. |
+| `NEXTAUTH_URL` | Recommended | Base URL of the deployed app (used for OAuth callback URLs if you add a provider later). |
+
+`src/lib/env.ts` validates these with Zod at startup and throws a clear error if any are missing — fail fast rather than surfacing a confusing runtime error deep in a request.
+
+## Demo account & seed data
+
+```
+demo@lifehub.app / Demo12345
+```
+
+Running `npm run db:seed` (safe to re-run — it deletes and recreates just this account) gives that account **three workspaces** (Personal, Work, Side Project) populated with ~90 days of realistic finance transactions, a dozen tasks and subtasks across several projects, goals with milestones (some already completed), a recurring weekly calendar event plus one-off events, two weeks of focus session history, pinned/tagged notes with checklists, four habits with 30 days of (intentionally imperfect) completion history, and 30 days of mood/wellbeing logs — so the app looks and feels used, not empty, the first time you open it.
+
+Brand-new sign-ups go through onboarding instead: pick the areas you want to manage (Work / Education / Personal / Finances / Health), and the app seeds a *small* set of starter content scoped to what you picked (`src/lib/services/onboarding.ts`) rather than the full demo dataset — enough to not feel empty, not so much that it feels fake.
+
+## Testing
+
+```bash
+npm test          # vitest run — one-shot
+npm run test:watch
+```
+
+59 tests across the trickiest *pure* logic in each module — deliberately not database-dependent, so they run instantly with no test DB setup:
+
+- Auth/validation schemas (`lib/validations/auth.test.ts`)
+- Recurrence expansion for the calendar — daily/weekly/by-weekday/interval/end-date cases (`lib/services/events.test.ts`)
+- Subtask progress, goal progress, workspace-delete guard, focus timer phase-cycling & clock formatting, budget dollar-parsing, habit streak calculation (gap + active-streak cases), markdown-to-snippet stripping — one test file per module, colocated next to the function it tests.
+
+**Manual/browser verification:** critical flows (registration → onboarding → dashboard, every module's page, sign-out/sign-in as the demo account, mobile viewport at 390px) were driven end-to-end with a scripted Playwright pass during development, checking for console/page errors after every navigation. `@playwright/test` is included as a dev dependency if you want to write your own e2e suite against `npm run dev`; none is checked in, since the ad hoc script was a verification tool, not a maintained suite.
+
+## Project structure
+
+```
+prisma/
+  schema.prisma       # full data model
+  seed.ts             # demo account + realistic data
+src/
+  app/
+    (auth)/           # /login, /register — centered card layout
+    (app)/            # every authenticated route, behind the app shell
+      dashboard/ calendar/ tasks/ projects/ goals/ focus/
+      finance/{transactions,budgets,bills,savings,categories}/
+      notes/ habits/ settings/
+    onboarding/
+    api/auth/[...nextauth]/
+  components/
+    ui/               # design-system primitives (Button, Card, Dialog, ...)
+    layout/           # app shell, sidebar, topbar, notifications bell
+    <module>/         # one folder per feature module, mirrors app/(app)/<module>
+  lib/
+    actions/<module>.ts       # "use server" — validate, call service, revalidate
+    services/<module>.ts      # plain async data-access functions
+    validations/<module>.ts   # zod schemas
+    session.ts                # requireWorkspace()
+    streaks.ts                # pure streak math (no Prisma import — safe for client components)
+  auth.ts             # Auth.js config
+  proxy.ts            # route protection (formerly middleware.ts)
+```
+
+## Known trade-offs & what's next
+
+Built to be honest about scope, not to hide corners:
+
+- **No real push notifications.** True web push needs VAPID keys and a deployed HTTPS origin; instead there's a full in-app notification center (bell dropdown, preference toggles per category, mark-read/mark-all-read) with a `syncDueNotifications()` sweep (`src/lib/services/notification-sync.ts`) that runs from the authenticated layout on every request, scanning for due tasks, upcoming event reminders, bills nearing their reminder window, and un-logged habits past their reminder time. There's no background scheduler in this architecture, so "check on read" is the pragmatic substitute for a cron job — the next real step here is a scheduled job (Vercel Cron, a queue worker) calling the same sync function and dispatching real push/email on top of it.
+- **Attachments are links, not files.** Task/note/project "attachments" store a name + URL, not an uploaded binary. Wiring up S3/Uploadthing-style storage is a natural extension of the existing `Attachment` model.
+- **Single-user workspaces.** A "Family" workspace today is really just a label — there's no multi-member sharing/invites yet. The schema (`Workspace.userId`) would need a join table (`WorkspaceMember`) to support that.
+- **`middleware.ts` → `proxy.ts`.** Next.js 16 deprecated the `middleware` file convention in favor of `proxy` (same behavior, Node.js runtime by default instead of Edge). This repo already uses the new convention.
+- **SQLite in dev.** Great for zero-config local development and for this demo; swap `DATABASE_URL` to a Postgres connection string for production (the schema was written to avoid SQLite-only quirks specifically so this is a config change, not a migration project).
+
+## Deployment
+
+1. Provision a Postgres database (Vercel Postgres, Neon, Supabase, RDS, …) and set `DATABASE_URL` to its connection string.
+2. Set `AUTH_SECRET` (a fresh one — don't reuse the local dev value) and `NEXTAUTH_URL` to your production URL.
+3. Run `npx prisma migrate deploy` against the production database as part of your deploy step.
+4. `npm run build && npm run start`, or deploy to Vercel (zero extra config needed for a standard Next.js App Router project).
+5. Optionally run `npm run db:seed` once against a **staging** database if you want a populated demo environment — never run it against a database with real user data, since it deletes and recreates the `demo@lifehub.app` account by design.
