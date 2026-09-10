@@ -12,6 +12,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { requireWorkspace } from "@/lib/session";
+import { db } from "@/lib/db";
 import { listEventInstancesInRange } from "@/lib/services/events";
 import { listTasks } from "@/lib/services/tasks";
 import { listGoals, computeGoalProgress } from "@/lib/services/goals";
@@ -27,10 +28,33 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { TaskQuickToggle } from "@/components/dashboard/task-quick-toggle";
 import { HabitsToday, type DashboardHabit } from "@/components/dashboard/habits-today";
 import { formatCurrency, formatTime, clamp } from "@/lib/utils";
+import type { FocusArea } from "@prisma/client";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
 const PRIORITY_RANK: Record<string, number> = { URGENT: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+
+type StatKey = "focus" | "finance" | "habits" | "goals";
+type CardKey = "schedule" | "tasks" | "habits" | "goals";
+
+/** Which onboarding focus areas make a given dashboard section more relevant to lead with. */
+const STAT_FOCUS: Record<StatKey, FocusArea[]> = {
+  focus: ["WORK", "EDUCATION"],
+  finance: ["FINANCES"],
+  habits: ["HEALTH"],
+  goals: ["EDUCATION", "WORK", "FINANCES", "HEALTH"],
+};
+const CARD_FOCUS: Record<CardKey, FocusArea[]> = {
+  schedule: ["PERSONAL", "WORK", "EDUCATION"],
+  tasks: ["WORK", "EDUCATION"],
+  habits: ["HEALTH"],
+  goals: ["FINANCES", "EDUCATION"],
+};
+
+function byFocusRelevance<K extends string>(keys: K[], focusMap: Record<K, FocusArea[]>, selected: FocusArea[]): K[] {
+  const score = (key: K) => focusMap[key].filter((a) => selected.includes(a)).length;
+  return [...keys].sort((a, b) => score(b) - score(a));
+}
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -38,27 +62,31 @@ export default async function DashboardPage() {
   const firstName = session?.user?.name?.split(" ")[0] ?? "there";
   const now = new Date();
 
-  const [
-    todayEvents,
-    allTasks,
-    goals,
-    focusAnalytics,
-    monthlyTotals,
-    budgets,
-    bills,
-    habits,
-    habitLogs,
-  ] = await Promise.all([
-    listEventInstancesInRange(workspace.id, startOfDay(now), endOfDay(now)),
-    listTasks(workspace.id),
-    listGoals(workspace.id),
-    getFocusAnalytics(workspace.id, now),
-    getMonthlyTotals(workspace.id, new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)),
-    listBudgetsWithSpend(workspace.id, new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)),
-    listRecurringBills(workspace.id),
-    listActiveHabits(workspace.id),
-    listRecentHabitLogs(workspace.id, 1),
-  ]);
+  const [todayEvents, allTasks, goals, focusAnalytics, monthlyTotals, budgets, bills, habits, habitLogs, onboardingProfile] =
+    await Promise.all([
+      listEventInstancesInRange(workspace.id, startOfDay(now), endOfDay(now)),
+      listTasks(workspace.id),
+      listGoals(workspace.id),
+      getFocusAnalytics(workspace.id, now),
+      getMonthlyTotals(
+        workspace.id,
+        new Date(now.getFullYear(), now.getMonth(), 1),
+        new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+      ),
+      listBudgetsWithSpend(
+        workspace.id,
+        new Date(now.getFullYear(), now.getMonth(), 1),
+        new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+      ),
+      listRecurringBills(workspace.id),
+      listActiveHabits(workspace.id),
+      listRecentHabitLogs(workspace.id, 1),
+      session?.user?.id ? db.onboardingProfile.findUnique({ where: { userId: session.user.id } }) : null,
+    ]);
+
+  const focusAreas: FocusArea[] = onboardingProfile?.focusAreasJson ? JSON.parse(onboardingProfile.focusAreasJson) : [];
+  const statOrder = byFocusRelevance<StatKey>(["focus", "finance", "habits", "goals"], STAT_FOCUS, focusAreas);
+  const cardOrder = byFocusRelevance<CardKey>(["schedule", "tasks", "habits", "goals"], CARD_FOCUS, focusAreas);
 
   const openTasks = allTasks.filter((t) => t.status !== "DONE" && t.status !== "ARCHIVED");
   const overdueTasks = openTasks.filter((t) => t.dueAt && new Date(t.dueAt) < now);
@@ -116,6 +144,171 @@ export default async function DashboardPage() {
     });
   }
 
+  const statCards: Record<StatKey, React.ReactNode> = {
+    focus: (
+      <StatCard
+        label="Focus today"
+        value={`${focusAnalytics.sessionsToday} session${focusAnalytics.sessionsToday === 1 ? "" : "s"}`}
+        icon={Timer}
+      />
+    ),
+    finance: (
+      <StatCard
+        label="This month"
+        value={formatCurrency(monthlyTotals.incomeCents - monthlyTotals.expenseCents)}
+        icon={Wallet}
+        trend={{
+          label: "Net income",
+          direction: monthlyTotals.incomeCents >= monthlyTotals.expenseCents ? "up" : "down",
+        }}
+      />
+    ),
+    habits: <StatCard label="Habits today" value={`${habitsDoneCount}/${dashboardHabits.length}`} icon={Flame} />,
+    goals: <StatCard label="Active goals" value={String(activeGoals.length)} icon={Target} />,
+  };
+
+  const sectionCards: Record<CardKey, React.ReactNode> = {
+    schedule: (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <CalendarIcon className="size-4" /> Today&apos;s schedule
+          </CardTitle>
+          <Link href="/calendar" className="flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">
+            Open calendar <ArrowRight className="size-3" />
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {todayEvents.length === 0 ? (
+            <EmptyState
+              icon={CalendarIcon}
+              title="Nothing scheduled today"
+              description="Enjoy the open time, or add something to your calendar."
+              className="py-6"
+            />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {todayEvents.map((instance) => (
+                <div key={instance.instanceId} className="flex items-center gap-3 text-sm">
+                  <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: instance.event.color }} />
+                  <span className="w-16 shrink-0 text-xs text-[var(--subtle-foreground)]">
+                    {instance.event.allDay ? "All day" : formatTime(instance.start)}
+                  </span>
+                  <span className="truncate">{instance.event.title}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    ),
+    tasks: (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <CheckCircle2 className="size-4" /> Priority tasks
+          </CardTitle>
+          <Link href="/tasks" className="flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">
+            View all <ArrowRight className="size-3" />
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {priorityTasks.length === 0 ? (
+            <EmptyState icon={CheckCircle2} title="All caught up" description="No open tasks need your attention right now." className="py-6" />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {priorityTasks.map((task) => {
+                const isOverdue = !!task.dueAt && new Date(task.dueAt) < now;
+                return (
+                  <div key={task.id} className="flex items-center gap-3">
+                    <TaskQuickToggle taskId={task.id} done={false} />
+                    <span className="min-w-0 flex-1 truncate text-sm">{task.title}</span>
+                    {isOverdue && (
+                      <Badge variant="danger" className="gap-1">
+                        <AlertTriangle className="size-3" /> overdue
+                      </Badge>
+                    )}
+                    <Badge
+                      variant={
+                        task.priority === "URGENT"
+                          ? "danger"
+                          : task.priority === "HIGH"
+                            ? "warning"
+                            : task.priority === "MEDIUM"
+                              ? "default"
+                              : "secondary"
+                      }
+                    >
+                      {task.priority.toLowerCase()}
+                    </Badge>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    ),
+    habits: (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Flame className="size-4" /> Habits today
+          </CardTitle>
+          <Link href="/habits" className="flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">
+            Manage <ArrowRight className="size-3" />
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {dashboardHabits.length === 0 ? (
+            <EmptyState icon={Flame} title="No habits yet" description="Add a habit to start building streaks." className="py-6" />
+          ) : (
+            <HabitsToday habits={dashboardHabits} />
+          )}
+        </CardContent>
+      </Card>
+    ),
+    goals: (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Target className="size-4" /> Goals in progress
+          </CardTitle>
+          <Link href="/goals" className="flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">
+            View all <ArrowRight className="size-3" />
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {activeGoals.length === 0 ? (
+            <EmptyState icon={Target} title="No active goals" description="Set a goal to start tracking progress." className="py-6" />
+          ) : (
+            <div className="flex flex-col gap-3">
+              {activeGoals.map((goal) => {
+                const progress = computeGoalProgress(goal);
+                return (
+                  <Link
+                    key={goal.id}
+                    href={`/goals/${goal.id}`}
+                    className="flex flex-col gap-1.5 rounded-[var(--radius-sm)] p-1 hover:bg-[var(--surface-sunken)]"
+                  >
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-2 truncate">
+                        <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: goal.color }} />
+                        {goal.title}
+                      </span>
+                      <span className="text-xs text-[var(--muted-foreground)]">{progress}%</span>
+                    </div>
+                    <Progress value={clamp(progress, 0, 100)} />
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    ),
+  };
+
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
       <div>
@@ -143,138 +336,15 @@ export default async function DashboardPage() {
       )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Focus today" value={`${focusAnalytics.sessionsToday} session${focusAnalytics.sessionsToday === 1 ? "" : "s"}`} icon={Timer} />
-        <StatCard label="This month" value={formatCurrency(monthlyTotals.incomeCents - monthlyTotals.expenseCents)} icon={Wallet} trend={{ label: "Net income", direction: monthlyTotals.incomeCents >= monthlyTotals.expenseCents ? "up" : "down" }} />
-        <StatCard label="Habits today" value={`${habitsDoneCount}/${dashboardHabits.length}`} icon={Flame} />
-        <StatCard label="Active goals" value={String(activeGoals.length)} icon={Target} />
+        {statOrder.map((key) => (
+          <div key={key}>{statCards[key]}</div>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <CalendarIcon className="size-4" /> Today&apos;s schedule
-            </CardTitle>
-            <Link href="/calendar" className="flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">
-              Open calendar <ArrowRight className="size-3" />
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {todayEvents.length === 0 ? (
-              <EmptyState icon={CalendarIcon} title="Nothing scheduled today" description="Enjoy the open time, or add something to your calendar." className="py-6" />
-            ) : (
-              <div className="flex flex-col gap-2">
-                {todayEvents.map((instance) => (
-                  <div key={instance.instanceId} className="flex items-center gap-3 text-sm">
-                    <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: instance.event.color }} />
-                    <span className="w-16 shrink-0 text-xs text-[var(--subtle-foreground)]">
-                      {instance.event.allDay ? "All day" : formatTime(instance.start)}
-                    </span>
-                    <span className="truncate">{instance.event.title}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <CheckCircle2 className="size-4" /> Priority tasks
-            </CardTitle>
-            <Link href="/tasks" className="flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">
-              View all <ArrowRight className="size-3" />
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {priorityTasks.length === 0 ? (
-              <EmptyState icon={CheckCircle2} title="All caught up" description="No open tasks need your attention right now." className="py-6" />
-            ) : (
-              <div className="flex flex-col gap-2">
-                {priorityTasks.map((task) => {
-                  const isOverdue = !!task.dueAt && new Date(task.dueAt) < now;
-                  return (
-                    <div key={task.id} className="flex items-center gap-3">
-                      <TaskQuickToggle taskId={task.id} done={false} />
-                      <span className="min-w-0 flex-1 truncate text-sm">{task.title}</span>
-                      {isOverdue && (
-                        <Badge variant="danger" className="gap-1">
-                          <AlertTriangle className="size-3" /> overdue
-                        </Badge>
-                      )}
-                      <Badge
-                        variant={
-                          task.priority === "URGENT"
-                            ? "danger"
-                            : task.priority === "HIGH"
-                              ? "warning"
-                              : task.priority === "MEDIUM"
-                                ? "default"
-                                : "secondary"
-                        }
-                      >
-                        {task.priority.toLowerCase()}
-                      </Badge>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Flame className="size-4" /> Habits today
-            </CardTitle>
-            <Link href="/habits" className="flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">
-              Manage <ArrowRight className="size-3" />
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {dashboardHabits.length === 0 ? (
-              <EmptyState icon={Flame} title="No habits yet" description="Add a habit to start building streaks." className="py-6" />
-            ) : (
-              <HabitsToday habits={dashboardHabits} />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Target className="size-4" /> Goals in progress
-            </CardTitle>
-            <Link href="/goals" className="flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">
-              View all <ArrowRight className="size-3" />
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {activeGoals.length === 0 ? (
-              <EmptyState icon={Target} title="No active goals" description="Set a goal to start tracking progress." className="py-6" />
-            ) : (
-              <div className="flex flex-col gap-3">
-                {activeGoals.map((goal) => {
-                  const progress = computeGoalProgress(goal);
-                  return (
-                    <Link key={goal.id} href={`/goals/${goal.id}`} className="flex flex-col gap-1.5 rounded-[var(--radius-sm)] p-1 hover:bg-[var(--surface-sunken)]">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="flex items-center gap-2 truncate">
-                          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: goal.color }} />
-                          {goal.title}
-                        </span>
-                        <span className="text-xs text-[var(--muted-foreground)]">{progress}%</span>
-                      </div>
-                      <Progress value={clamp(progress, 0, 100)} />
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {cardOrder.map((key) => (
+          <div key={key}>{sectionCards[key]}</div>
+        ))}
       </div>
     </div>
   );
