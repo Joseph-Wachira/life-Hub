@@ -198,7 +198,22 @@ export default async function DashboardPage() {
                     <div key={task.id} className="flex items-center gap-3">
                       <TaskQuickToggle taskId={task.id} done={false} />
                       <span className="min-w-0 flex-1 truncate text-sm">{task.title}</span>
-                      <Badge variant={isOverdue ? "danger" : task.priority === "URGENT" || task.priority === "HIGH" ? "warning" : "secondary"}>
+                      {isOverdue && (
+                        <Badge variant="danger" className="gap-1">
+                          <AlertTriangle className="size-3" /> overdue
+                        </Badge>
+                      )}
+                      <Badge
+                        variant={
+                          task.priority === "URGENT"
+                            ? "danger"
+                            : task.priority === "HIGH"
+                              ? "warning"
+                              : task.priority === "MEDIUM"
+                                ? "default"
+                                : "secondary"
+                        }
+                      >
                         {task.priority.toLowerCase()}
                       </Badge>
                     </div>
