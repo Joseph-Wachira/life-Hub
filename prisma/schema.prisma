@@ -1,0 +1,651 @@
+// Life Hub — Prisma schema
+// SQLite for local/demo use. Swap `provider`/`url` in datasource to Postgres for production;
+// the schema below avoids SQLite-incompatible features (Decimal, scalar list columns) on purpose,
+// so it ports to Postgres/MySQL with no model changes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth (Auth.js / NextAuth v5 Prisma adapter shape)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts          Account[]
+  sessions          Session[]
+  workspaces        Workspace[]
+  onboardingProfile OnboardingProfile?
+  settings          UserSettings?
+  notificationPref  NotificationPreference?
+  focusSessions     FocusSession[]
+  notifications     Notification[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding & user preferences
+// ---------------------------------------------------------------------------
+
+enum FocusArea {
+  WORK
+  EDUCATION
+  PERSONAL
+  FINANCES
+  HEALTH
+}
+
+model OnboardingProfile {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  focusAreasJson String // JSON-encoded FocusArea[]
+  role           String? // e.g. "student", "employee", "freelancer", "entrepreneur", "parent"
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserSettings {
+  id                        String @id @default(cuid())
+  userId                    String @unique
+  theme                     String @default("system") // "light" | "dark" | "system"
+  weekStartsOn              Int    @default(1) // 0 = Sunday
+  timezone                  String @default("UTC")
+  pomodoroWorkMinutes       Int    @default(25)
+  pomodoroShortBreakMinutes Int    @default(5)
+  pomodoroLongBreakMinutes  Int    @default(15)
+  sessionsBeforeLongBreak   Int    @default(4)
+  currency                  String @default("USD")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model NotificationPreference {
+  id                     String  @id @default(cuid())
+  userId                 String  @unique
+  eventReminders         Boolean @default(true)
+  taskReminders          Boolean @default(true)
+  billReminders          Boolean @default(true)
+  habitReminders         Boolean @default(true)
+  goalUpdates            Boolean @default(true)
+  defaultReminderMinutes Int     @default(30)
+  quietHoursStart        String? // "HH:mm"
+  quietHoursEnd          String? // "HH:mm"
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Workspaces
+// ---------------------------------------------------------------------------
+
+enum WorkspaceType {
+  PERSONAL
+  WORK
+  SCHOOL
+  FAMILY
+  SIDE_PROJECT
+}
+
+model Workspace {
+  id        String        @id @default(cuid())
+  userId    String
+  name      String
+  type      WorkspaceType
+  color     String        @default("#6366f1")
+  icon      String        @default("sparkles")
+  isDefault Boolean       @default(false)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  events         Event[]
+  tasks          Task[]
+  projects       Project[]
+  goals          Goal[]
+  tags           Tag[]
+  focusSessions  FocusSession[]
+  transactions   Transaction[]
+  categories     Category[]
+  budgets        Budget[]
+  recurringBills RecurringBill[]
+  savingsGoals   SavingsGoal[]
+  notes          Note[]
+  noteFolders    NoteFolder[]
+  habits         Habit[]
+  moodCheckIns   MoodCheckIn[]
+  wellbeingLogs  WellbeingLog[]
+  notifications  Notification[]
+  attachments    Attachment[]
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Calendar
+// ---------------------------------------------------------------------------
+
+model Event {
+  id                    String    @id @default(cuid())
+  workspaceId           String
+  title                 String
+  description           String?
+  location              String?
+  startAt               DateTime
+  endAt                 DateTime
+  allDay                Boolean   @default(false)
+  color                 String    @default("#6366f1")
+  recurrenceRuleJson    String? // JSON: { freq, interval, byWeekday?, count?, until? }
+  recurrenceEndAt       DateTime?
+  reminderMinutesBefore Int?
+  projectId             String?
+  taskId                String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, startAt])
+}
+
+// ---------------------------------------------------------------------------
+// Tasks & projects
+// ---------------------------------------------------------------------------
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  ARCHIVED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id           String     @id @default(cuid())
+  workspaceId  String
+  title        String
+  description  String?
+  status       TaskStatus @default(TODO)
+  priority     Priority   @default(MEDIUM)
+  dueAt        DateTime?
+  position     Float      @default(0)
+  projectId    String?
+  goalId       String?
+  parentTaskId String?
+  completedAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project       Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  goal          Goal?          @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  parentTask    Task?          @relation("Subtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks      Task[]         @relation("Subtasks")
+  tags          Tag[]          @relation("TaskTags")
+  events        Event[]
+  attachments   Attachment[]
+  focusSessions FocusSession[]
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, dueAt])
+  @@index([parentTaskId])
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  workspaceId String
+  name        String
+  description String?
+  color       String        @default("#6366f1")
+  status      ProjectStatus @default(ACTIVE)
+  goalId      String?
+  startAt     DateTime?
+  dueAt       DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  goal        Goal?        @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  tasks       Task[]
+  events      Event[]
+  attachments Attachment[]
+  notes       Note[]
+
+  @@index([workspaceId, status])
+}
+
+model Tag {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  color       String   @default("#6366f1")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tasks     Task[]    @relation("TaskTags")
+  notes     Note[]    @relation("NoteTags")
+
+  @@unique([workspaceId, name])
+}
+
+// ---------------------------------------------------------------------------
+// Goals
+// ---------------------------------------------------------------------------
+
+enum GoalCategory {
+  PERSONAL
+  FINANCIAL
+  FITNESS
+  CAREER
+  LEARNING
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+model Goal {
+  id          String       @id @default(cuid())
+  workspaceId String
+  title       String
+  description String?
+  category    GoalCategory
+  status      GoalStatus   @default(ACTIVE)
+  targetDate  DateTime?
+  color       String       @default("#6366f1")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  milestones Milestone[]
+  tasks      Task[]
+  projects   Project[]
+
+  @@index([workspaceId, status])
+}
+
+model Milestone {
+  id          String    @id @default(cuid())
+  goalId      String
+  title       String
+  dueAt       DateTime?
+  completedAt DateTime?
+  position    Float     @default(0)
+
+  goal Goal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId])
+}
+
+// ---------------------------------------------------------------------------
+// Focus system
+// ---------------------------------------------------------------------------
+
+enum FocusSessionType {
+  POMODORO
+  DEEP_WORK
+  CUSTOM
+}
+
+model FocusSession {
+  id             String           @id @default(cuid())
+  workspaceId    String
+  userId         String
+  type           FocusSessionType @default(POMODORO)
+  plannedMinutes Int
+  actualMinutes  Int              @default(0)
+  startedAt      DateTime
+  endedAt        DateTime?
+  taskId         String?
+  interruptions  Int              @default(0)
+  notes          String?
+  rating         Int? // 1-5 post-session focus rating
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, startedAt])
+  @@index([userId, startedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Finance
+// ---------------------------------------------------------------------------
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+model Category {
+  id          String          @id @default(cuid())
+  workspaceId String
+  name        String
+  type        TransactionType
+  color       String          @default("#6366f1")
+  icon        String          @default("circle")
+
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+  budgets        Budget[]
+  recurringBills RecurringBill[]
+
+  @@unique([workspaceId, name, type])
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  workspaceId String
+  type        TransactionType
+  amountCents Int
+  currency    String          @default("USD")
+  categoryId  String?
+  description String?
+  occurredAt  DateTime
+  createdAt   DateTime        @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category  Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, occurredAt])
+  @@index([workspaceId, type])
+}
+
+model Budget {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  categoryId        String
+  monthlyLimitCents Int
+  createdAt         DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, categoryId])
+}
+
+enum BillFrequency {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model RecurringBill {
+  id                 String        @id @default(cuid())
+  workspaceId        String
+  name               String
+  amountCents        Int
+  categoryId         String?
+  frequency          BillFrequency @default(MONTHLY)
+  nextDueDate        DateTime
+  autoPay            Boolean       @default(false)
+  reminderDaysBefore Int           @default(3)
+  createdAt          DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category  Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, nextDueDate])
+}
+
+model SavingsGoal {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  name               String
+  targetAmountCents  Int
+  currentAmountCents Int       @default(0)
+  targetDate         DateTime?
+  color              String    @default("#22c55e")
+  icon               String    @default("piggy-bank")
+  createdAt          DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Notes
+// ---------------------------------------------------------------------------
+
+model NoteFolder {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  color       String   @default("#6366f1")
+  parentId    String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent    NoteFolder?  @relation("NoteFolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  NoteFolder[] @relation("NoteFolderTree")
+  notes     Note[]
+
+  @@index([workspaceId])
+}
+
+model Note {
+  id          String   @id @default(cuid())
+  workspaceId String
+  folderId    String?
+  title       String
+  contentMd   String   @default("")
+  isPinned    Boolean  @default(false)
+  projectId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folder      NoteFolder?         @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  project     Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  tags        Tag[]               @relation("NoteTags")
+  checklist   NoteChecklistItem[]
+  attachments Attachment[]
+
+  @@index([workspaceId, isPinned])
+  @@index([folderId])
+}
+
+model NoteChecklistItem {
+  id       String  @id @default(cuid())
+  noteId   String
+  text     String
+  checked  Boolean @default(false)
+  position Float   @default(0)
+
+  note Note @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@index([noteId])
+}
+
+// ---------------------------------------------------------------------------
+// Habits & wellbeing
+// ---------------------------------------------------------------------------
+
+model Habit {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  name           String
+  icon           String    @default("check-circle")
+  color          String    @default("#6366f1")
+  daysOfWeekJson String    @default("[0,1,2,3,4,5,6]") // JSON int[] 0=Sun
+  targetPerDay   Int       @default(1)
+  reminderTime   String? // "HH:mm"
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  logs      HabitLog[]
+
+  @@index([workspaceId])
+}
+
+model HabitLog {
+  id             String   @id @default(cuid())
+  habitId        String
+  date           DateTime // stored at midnight UTC representing the day
+  completedCount Int      @default(1)
+  note           String?
+
+  habit Habit @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  @@unique([habitId, date])
+}
+
+enum Mood {
+  VERY_LOW
+  LOW
+  NEUTRAL
+  GOOD
+  GREAT
+}
+
+model MoodCheckIn {
+  id          String   @id @default(cuid())
+  workspaceId String
+  date        DateTime
+  mood        Mood
+  energyLevel Int      @default(3) // 1-5
+  note        String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, date])
+}
+
+model WellbeingLog {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  date            DateTime
+  sleepHours      Float?
+  exerciseMinutes Int?
+  waterMl         Int?
+  createdAt       DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, date])
+}
+
+// ---------------------------------------------------------------------------
+// Notifications & attachments
+// ---------------------------------------------------------------------------
+
+enum NotificationType {
+  EVENT_REMINDER
+  TASK_DUE
+  BILL_DUE
+  HABIT_REMINDER
+  GOAL_MILESTONE
+  SYSTEM
+}
+
+model Notification {
+  id           String           @id @default(cuid())
+  userId       String
+  workspaceId  String?
+  type         NotificationType
+  title        String
+  body         String?
+  entityType   String?
+  entityId     String?
+  isRead       Boolean          @default(false)
+  scheduledFor DateTime
+  createdAt    DateTime         @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, scheduledFor])
+}
+
+model Attachment {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  taskId        String?
+  projectId     String?
+  noteId        String?
+  fileName      String
+  fileUrl       String
+  fileType      String   @default("application/octet-stream")
+  fileSizeBytes Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  note      Note?     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
