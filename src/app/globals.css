@@ -186,6 +186,78 @@
 }
 
 @layer utilities {
+  .note-prose {
+    line-height: 1.6;
+  }
+  .note-prose h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0.6em 0 0.3em;
+  }
+  .note-prose h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0.6em 0 0.3em;
+  }
+  .note-prose h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0.5em 0 0.25em;
+  }
+  .note-prose p {
+    margin: 0.5em 0;
+  }
+  .note-prose ul,
+  .note-prose ol {
+    margin: 0.5em 0;
+    padding-left: 1.4em;
+  }
+  .note-prose li {
+    margin: 0.15em 0;
+  }
+  .note-prose a {
+    color: var(--brand);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .note-prose code {
+    background: var(--surface-sunken);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+    font-size: 0.9em;
+  }
+  .note-prose pre {
+    background: var(--surface-sunken);
+    border-radius: var(--radius-md);
+    padding: 0.75em 1em;
+    overflow-x: auto;
+  }
+  .note-prose pre code {
+    background: none;
+    padding: 0;
+  }
+  .note-prose blockquote {
+    border-left: 3px solid var(--border-strong);
+    padding-left: 0.75em;
+    color: var(--muted-foreground);
+    margin: 0.5em 0;
+  }
+  .note-prose hr {
+    border-color: var(--border);
+    margin: 1em 0;
+  }
+  .note-prose table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.5em 0;
+  }
+  .note-prose th,
+  .note-prose td {
+    border: 1px solid var(--border);
+    padding: 0.4em 0.6em;
+    text-align: left;
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
