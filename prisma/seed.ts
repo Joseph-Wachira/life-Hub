@@ -540,37 +540,14 @@ async function main() {
 
   // -------------------------------------------------------------------
   // Notifications
+  //
+  // Only "historical" notifications are seeded here — the live
+  // syncDueNotifications() sweep (run from the (app) layout on first
+  // page load) generates accurate, deduplicated due/reminder
+  // notifications for tasks, bills, events, and habits on its own.
   // -------------------------------------------------------------------
   await db.notification.createMany({
     data: [
-      {
-        userId: user.id,
-        workspaceId: personal.id,
-        type: "BILL_DUE",
-        title: "Gym membership due in 2 days",
-        body: "$45.00 will be charged automatically.",
-        entityType: "RecurringBill",
-        scheduledFor: daysFromNow(0),
-        isRead: false,
-      },
-      {
-        userId: user.id,
-        workspaceId: personal.id,
-        type: "TASK_DUE",
-        title: "\"Renew passport\" is due tomorrow",
-        entityType: "Task",
-        scheduledFor: daysFromNow(0),
-        isRead: false,
-      },
-      {
-        userId: user.id,
-        workspaceId: work.id,
-        type: "EVENT_REMINDER",
-        title: "Client A check-in starts in 15 minutes",
-        entityType: "Event",
-        scheduledFor: daysFromNow(0),
-        isRead: false,
-      },
       {
         userId: user.id,
         workspaceId: personal.id,

@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireWorkspace } from "@/lib/session";
+import { db } from "@/lib/db";
 import {
   createGoal,
   updateGoal,
@@ -122,8 +123,30 @@ export async function toggleMilestoneAction(
   milestoneId: string,
   completed: boolean
 ): Promise<ActionResult> {
-  const { workspace } = await requireWorkspace();
+  const { userId, workspace } = await requireWorkspace();
   await toggleMilestone(workspace.id, milestoneId, completed);
+
+  if (completed) {
+    const [milestone, prefs] = await Promise.all([
+      db.milestone.findUnique({ where: { id: milestoneId }, select: { title: true } }),
+      db.notificationPreference.findUnique({ where: { userId } }),
+    ]);
+    if (milestone && (prefs?.goalUpdates ?? true)) {
+      await db.notification.create({
+        data: {
+          userId,
+          workspaceId: workspace.id,
+          type: "GOAL_MILESTONE",
+          title: `You completed a milestone: "${milestone.title}"`,
+          entityType: "Milestone",
+          entityId: milestoneId,
+          scheduledFor: new Date(),
+          isRead: false,
+        },
+      });
+    }
+  }
+
   revalidatePath(`/goals/${goalId}`);
   revalidatePath("/goals");
   return { success: true };

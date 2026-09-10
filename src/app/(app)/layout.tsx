@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { resolveActiveWorkspace } from "@/lib/services/workspace";
+import { syncDueNotifications } from "@/lib/services/notification-sync";
 import { ACTIVE_WORKSPACE_COOKIE } from "@/lib/constants/cookies";
 import { AppShell } from "@/components/layout/app-shell";
 
@@ -22,6 +23,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   );
 
   if (!active) redirect("/onboarding");
+
+  await syncDueNotifications(session.user.id).catch((error) => {
+    console.error("syncDueNotifications failed", error);
+  });
 
   return (
     <AppShell workspace={active} workspaces={workspaces} user={session.user}>
