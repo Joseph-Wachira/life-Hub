@@ -70,6 +70,60 @@ export async function createFocusSession(input: CreateFocusSessionInput) {
   return db.focusSession.create({ data: input });
 }
 
+export interface StartFocusSessionData {
+  workspaceId: string;
+  userId: string;
+  type: FocusSessionTypeValue;
+  plannedMinutes: number;
+  taskId?: string;
+}
+
+/**
+ * Records a session as started right now, with no end time yet. Used by the
+ * mobile app so a timer survives the app being backgrounded or killed: the
+ * server holds the start time, and the client only needs to resume counting
+ * from `startedAt` rather than carry the whole timer in memory. The web
+ * timer instead calls `createFocusSession` once, after the fact, with a
+ * complete record — both are valid ways to use the same table.
+ */
+export async function startFocusSession(data: StartFocusSessionData) {
+  return db.focusSession.create({
+    data: {
+      workspaceId: data.workspaceId,
+      userId: data.userId,
+      type: data.type,
+      plannedMinutes: data.plannedMinutes,
+      actualMinutes: 0,
+      startedAt: new Date(),
+      taskId: data.taskId,
+    },
+  });
+}
+
+export async function getFocusSessionById(workspaceId: string, id: string) {
+  return db.focusSession.findFirst({ where: { id, workspaceId } });
+}
+
+export interface EndFocusSessionData {
+  actualMinutes: number;
+  interruptions?: number;
+  rating?: number;
+  notes?: string;
+}
+
+export async function endFocusSession(id: string, data: EndFocusSessionData) {
+  return db.focusSession.update({
+    where: { id },
+    data: {
+      endedAt: new Date(),
+      actualMinutes: data.actualMinutes,
+      interruptions: data.interruptions ?? 0,
+      rating: data.rating,
+      notes: data.notes,
+    },
+  });
+}
+
 export async function listRecentFocusSessions(workspaceId: string, take = 20) {
   return db.focusSession.findMany({
     where: { workspaceId },

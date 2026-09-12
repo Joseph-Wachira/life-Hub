@@ -14,6 +14,7 @@ This is a complete, working full-stack application — not a mockup. Every modul
 - [Demo account & seed data](#demo-account--seed-data)
 - [Testing](#testing)
 - [Project structure](#project-structure)
+- [Mobile app](#mobile-app)
 - [Known trade-offs & what's next](#known-trade-offs--whats-next)
 - [Deployment](#deployment)
 
@@ -105,6 +106,7 @@ See [`.env.example`](.env.example) for the full list with comments. Summary:
 | `DATABASE_URL` | Yes | `file:./dev.db` for local SQLite. Point at a Postgres/MySQL connection string in production — no schema changes needed. |
 | `AUTH_SECRET` | Yes | Session encryption key for Auth.js. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. |
 | `NEXTAUTH_URL` | Recommended | Base URL of the deployed app (used for OAuth callback URLs if you add a provider later). |
+| `MOBILE_JWT_SECRET` | Yes | Signs bearer tokens for the mobile app's API (`src/lib/mobile/jwt.ts`) — deliberately a *different* secret than `AUTH_SECRET`. Generate the same way. See [Mobile app](#mobile-app). |
 
 `src/lib/env.ts` validates these with Zod at startup and throws a clear error if any are missing — fail fast rather than surfacing a confusing runtime error deep in a request.
 
@@ -131,13 +133,17 @@ npm run test:watch
 - Recurrence expansion for the calendar — daily/weekly/by-weekday/interval/end-date cases (`lib/services/events.test.ts`)
 - Subtask progress, goal progress, workspace-delete guard, focus timer phase-cycling & clock formatting, budget dollar-parsing, habit streak calculation (gap + active-streak cases), markdown-to-snippet stripping — one test file per module, colocated next to the function it tests.
 
+Plus 18 more covering the mobile API specifically (see [Mobile app → Testing](#mobile-app)): 5 pure token-signing tests (`lib/mobile/jwt.test.ts`) and 13 integration tests (`app/api/mobile/v1/mobile-api.test.ts`) that run the real route handlers against a disposable SQLite database — login/refresh/logout, refresh-token rotation and reuse-detection, and, most importantly, that one signed-in user can't read or delete another user's workspace data.
+
 **Manual/browser verification:** critical flows (registration → onboarding → dashboard, every module's page, sign-out/sign-in as the demo account, mobile viewport at 390px) were driven end-to-end with a scripted Playwright pass during development, checking for console/page errors after every navigation. `@playwright/test` is included as a dev dependency if you want to write your own e2e suite against `npm run dev`; none is checked in, since the ad hoc script was a verification tool, not a maintained suite.
 
 ## Project structure
 
+The repo is an npm-workspaces monorepo: this Next.js app at the root, plus `apps/mobile` (Expo) and `packages/shared` (contracts shared between them) — see [Mobile app](#mobile-app) below.
+
 ```
 prisma/
-  schema.prisma       # full data model
+  schema.prisma       # full data model, incl. mobile-only MobileSession/PushToken tables
   seed.ts             # demo account + realistic data
 src/
   app/
@@ -147,7 +153,9 @@ src/
       finance/{transactions,budgets,bills,savings,categories}/
       notes/ habits/ settings/
     onboarding/
-    api/auth/[...nextauth]/
+    api/
+      auth/[...nextauth]/
+      mobile/v1/      # versioned JSON API for apps/mobile — see its own README.md
   components/
     ui/               # design-system primitives (Button, Card, Dialog, ...)
     layout/           # app shell, sidebar, topbar, notifications bell
@@ -156,11 +164,104 @@ src/
     actions/<module>.ts       # "use server" — validate, call service, revalidate
     services/<module>.ts      # plain async data-access functions
     validations/<module>.ts   # zod schemas
+    mobile/                    # JWT signing, refresh-token rotation, request-auth — used only by app/api/mobile/v1/**
     session.ts                # requireWorkspace()
     streaks.ts                # pure streak math (no Prisma import — safe for client components)
   auth.ts             # Auth.js config
   proxy.ts            # route protection (formerly middleware.ts)
+apps/mobile/          # Expo Router (iOS/Android) app
+packages/shared/      # @lifehub/shared — types + Zod contracts shared by the mobile app and app/api/mobile/v1
 ```
+
+## Mobile app
+
+`apps/mobile` is a React Native + Expo (SDK 57) + TypeScript app for iOS and Android sharing this same data model — it never talks to Prisma/SQLite directly. Every read/write goes through a versioned JSON API at `src/app/api/mobile/v1/**` (Next.js Route Handlers), which itself just calls into the same `lib/services/*` functions the web app uses (adding a couple of new ones: `startFocusSession`/`endFocusSession`, `listHabitsWithProgress`). The contract those routes follow (response envelope, auth header, workspace-scoping rules) is documented in [`src/app/api/mobile/v1/README.md`](src/app/api/mobile/v1/README.md).
+
+### Architecture
+
+```
+apps/mobile/src/
+  app/                       # Expo Router routes (file-based)
+    _layout.tsx              # React Query (+ AsyncStorage persistence) and auth providers, splash screen
+    sign-in.tsx              # public
+    (app)/                   # Stack.Protected — only reachable once signed in
+      (tabs)/                # bottom tabs: Today, Plan, Focus, Finance, More
+      task/[id].tsx  event/[id].tsx  note/[id].tsx
+      habits.tsx  notes.tsx  notifications.tsx  workspaces.tsx  settings.tsx
+      modals/                # presentation:"modal" screens — the create flows
+  components/ui/             # accessible, theme-aware component kit (Button, Card, TextField, EmptyState, ErrorState, Skeleton, SyncStatusBar, ...)
+  features/<domain>/api.ts   # one file per module — React Query hooks over the mobile API
+  lib/
+    api/client.ts            # fetch wrapper: bearer auth, silent refresh-on-401, NetworkError
+    api/query-client.ts      # QueryClient wired to NetInfo (online/offline) + AsyncStorage persistence
+    auth/auth-context.tsx    # session state, sign in/out, active workspace
+    storage/token-storage.ts # expo-secure-store wrapper
+    forms/fire-create-mutation.ts # offline-safe "create" submit pattern (see Offline behavior below)
+  theme/                     # design tokens + light/dark hook, mirrors the web app's palette
+```
+
+### Authentication
+
+- Sign-in exchanges email/password for a short-lived (15 min) access token plus a rotating refresh token (`src/lib/mobile/jwt.ts`, `src/lib/mobile/refresh-tokens.ts`).
+- Tokens are signed with `MOBILE_JWT_SECRET` — deliberately a *different* secret than Auth.js's `AUTH_SECRET`, so the mobile app and the web session cookie can never be confused for one another.
+- Refresh tokens are stored server-side only as a SHA-256 hash (`MobileSession` table) and rotate on every use. Presenting an already-rotated (i.e. copied/replayed) refresh token revokes every session on the account, not just that one.
+- The app stores both tokens in `expo-secure-store` (Keychain/Keystore) and transparently refreshes on a 401 (`src/lib/api/client.ts`) — callers never see the expiry, only a `NetworkError` if there's genuinely no connectivity.
+- There's no mobile sign-up flow in this release: sign in with an account created on the web app, or the demo account below.
+
+### Running it
+
+```bash
+# 1. Web app + mobile API, from the repo root
+npm install                 # installs the whole workspace: this app, apps/mobile, packages/shared
+npx prisma migrate deploy
+npm run db:seed
+npm run dev                  # http://localhost:3000 — mobile API under /api/mobile/v1
+
+# 2. Mobile app, in a second terminal
+cd apps/mobile
+cp .env.example .env         # set EXPO_PUBLIC_API_URL — see table below
+npm run ios                  # or: npm run android / npm run web
+```
+
+`EXPO_PUBLIC_API_URL` has to be reachable from wherever the app actually runs — `localhost` only resolves on the machine it's set on:
+
+| Target | `EXPO_PUBLIC_API_URL` |
+| --- | --- |
+| iOS Simulator | `http://localhost:3000/api/mobile/v1` |
+| Android Emulator | `http://10.0.2.2:3000/api/mobile/v1` |
+| Physical device (Expo Go / dev build) | `http://<your-machine's-LAN-IP>:3000/api/mobile/v1` |
+
+Sign in with the same demo account as the web app: `demo@lifehub.app` / `Demo12345`.
+
+### Environment variables
+
+| Variable | Where | Notes |
+| --- | --- | --- |
+| `MOBILE_JWT_SECRET` | root `.env` | See [Environment variables](#environment-variables) above. |
+| `EXPO_PUBLIC_API_URL` | `apps/mobile/.env` | Base URL of `/api/mobile/v1` — see the reachability table above. Gets inlined into the JS bundle at build time, so never put a real secret in an `EXPO_PUBLIC_*` variable. |
+
+### Offline behavior
+
+Reads go through TanStack Query with an `AsyncStorage` persister, so the last-loaded data for a screen survives an app restart and renders immediately while a background refetch runs. Mutations use `networkMode: 'offlineFirst'`: offline, they queue instead of failing, and resume automatically once `@react-native-community/netinfo` reports connectivity again — including across an app restart, via `resumePausedMutations()`. "Create" flows (new task/event/note/transaction) don't block their modal on that round-trip finishing (`src/lib/forms/fire-create-mutation.ts` races a short timeout against the real request, so a slow or offline submit still closes the modal instead of hanging); task-complete and habit-tick toggles are additionally optimistic. A slim banner (`SyncStatusBar`, mounted in every `Screen`) shows "offline" / "syncing N changes" whenever that's true and renders nothing otherwise.
+
+### Testing
+
+```bash
+cd apps/mobile
+npm run typecheck
+npm test             # jest — API client refresh-on-401, the offline-submit helper, a component interaction test
+```
+
+From the repo root, `npm test` also covers the mobile *API*: `src/app/api/mobile/v1/mobile-api.test.ts` runs the real route handlers against a disposable SQLite database (created and torn down per run, never touching `prisma/dev.db`) — login, token refresh/rotation/reuse-detection, logout, and cross-user authorization (one signed-in user reading or deleting another user's workspace/tasks). `src/lib/mobile/jwt.test.ts` covers token signing/verification in isolation.
+
+### Known limitations
+
+- **No mobile sign-up/onboarding.** A brand-new web account with zero workspaces shows an empty workspace switcher on mobile — there's nothing to onboard into yet from this app.
+- **Push notifications are wired up but unverified.** Permission requests, Android channel setup, token registration (`POST /api/mobile/v1/notifications/push-token`, backed by a new `PushToken` table), and the send path (`src/lib/services/push.ts`, invoked from the same `syncDueNotifications` sweep the web app already runs) are implemented against Expo's documented push HTTP API. Actually sending a token to Expo's push service also needs an EAS project id (`app.json`'s `extra.eas.projectId`), which means running `eas init` against a real Expo account — not done here, so delivery to a physical device has not been tested end-to-end. Enabling the toggle in Settings without that configured explains as much rather than pretending it works.
+- **Calendar creation is simplified.** Mobile can create a same-day, non-recurring event (Today/Tomorrow + optional time); recurrence and editing an existing event still need the web app. Viewing correctly expands recurring events created there, though.
+- **No project/goal screens.** Tasks show which project they belong to (read-only); there's no mobile UI to manage projects or goals, by design for this release.
+- **A queued mutation that later fails for a real (non-network) reason doesn't surface a toast once you've already navigated away** — only the persistent "syncing" banner reflects that something is still pending. A proper toast/notification-center hookup is the natural next step here.
+- **Not run on an actual Simulator/Emulator/device.** Verified via `tsc --noEmit`, `jest`, `expo lint`, `npx expo export --platform ios` (bundles cleanly — 3805 modules, zero errors), and the real Next.js dev server + demo account over HTTP, but no iOS Simulator or Android Emulator was available in this environment to launch the app itself. The setup (Expo Router, Metro monorepo config, native module set) is standard and should run as-is; a first real launch is the natural next check before shipping.
 
 ## Known trade-offs & what's next
 

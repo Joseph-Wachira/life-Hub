@@ -9,5 +9,10 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     globals: true,
     css: false,
+    // apps/mobile is a separate Expo/React Native project with its own
+    // Jest runner (`npm --prefix apps/mobile test`) — RN source relies on
+    // Babel/Flow-aware transforms Vitest's esbuild pipeline doesn't
+    // understand, so it must never be picked up here.
+    exclude: ["**/node_modules/**", "**/apps/**", "**/packages/**", "**/.git/**"],
   },
 });

@@ -1,0 +1,11 @@
+{
+  "name": "@lifehub/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Types and Zod contracts shared between the Life Hub Next.js API and the Expo mobile app.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "zod": "^4.6.1"
+  }
+}

@@ -34,6 +34,8 @@ model User {
   notificationPref  NotificationPreference?
   focusSessions     FocusSession[]
   notifications     Notification[]
+  mobileSessions    MobileSession[]
+  pushTokens        PushToken[]
 }
 
 model Account {
@@ -123,6 +125,48 @@ model NotificationPreference {
   quietHoursEnd          String? // "HH:mm"
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Mobile app (JWT/bearer auth + push)
+// ---------------------------------------------------------------------------
+
+// One row per signed-in mobile device. The refresh token itself is never
+// stored — only a SHA-256 hash of it — so a leaked database dump can't be
+// replayed as a session, mirroring how User.passwordHash never stores a
+// plaintext password. Rotated on every /auth/refresh call (see
+// src/lib/mobile/refresh-tokens.ts); revoking a row (sign-out, reuse
+// detection) is what makes "sign out" actually invalidate a device.
+model MobileSession {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String    @unique
+  deviceName       String?
+  createdAt        DateTime  @default(now())
+  lastUsedAt       DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Expo push tokens registered by a signed-in device. Populated by
+// POST /api/mobile/v1/notifications/push-token; see src/lib/services/push.ts
+// for the (untested-against-a-real-device) send path and the mobile README
+// section for exactly what "prepared but unverified" means here.
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  platform  String // "ios" | "android"
+  deviceName String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // ---------------------------------------------------------------------------

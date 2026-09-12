@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { expandRecurrence } from "@/lib/services/events";
+import { sendExpoPushToUser } from "@/lib/services/push";
 
 function dayKey(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -33,6 +34,15 @@ async function ensureNotification(input: {
       scheduledFor: input.scheduledFor,
     },
   });
+
+  // Best-effort: a push failure (no registered device, Expo service hiccup,
+  // etc.) must never break in-app notification creation, which is the part
+  // that's actually relied upon today.
+  try {
+    await sendExpoPushToUser(input.userId, { title: input.title, body: input.body });
+  } catch (error) {
+    console.error("[notifications] push send failed", error);
+  }
 }
 
 /**

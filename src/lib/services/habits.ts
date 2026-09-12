@@ -1,7 +1,8 @@
 import { db } from "@/lib/db";
-import type { Mood } from "@prisma/client";
+import type { Habit, Mood } from "@prisma/client";
+import { computeStreaks } from "@/lib/streaks";
 
-export { computeStreaks } from "@/lib/streaks";
+export { computeStreaks };
 
 function midnight(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -89,6 +90,33 @@ export async function toggleHabitToday(workspaceId: string, habitId: string) {
   }
   await db.habitLog.delete({ where: { id: existing.id } });
   return null;
+}
+
+export interface HabitWithProgress {
+  habit: Habit;
+  todayCompletedCount: number;
+  streak: { current: number; longest: number };
+}
+
+/**
+ * Bundles each active habit with today's completion count and its streak —
+ * the exact shape the Today dashboard and the mobile Habits screen both
+ * need, computed once instead of twice.
+ */
+export async function listHabitsWithProgress(workspaceId: string, now: Date = new Date()): Promise<HabitWithProgress[]> {
+  const [habits, logs] = await Promise.all([listActiveHabits(workspaceId), listRecentHabitLogs(workspaceId, 90)]);
+
+  return habits.map((habit) => {
+    const habitLogs = logs.filter((log) => log.habitId === habit.id);
+    const todayLog = habitLogs.find((log) => new Date(log.date).toDateString() === now.toDateString());
+    const daysOfWeek: number[] = JSON.parse(habit.daysOfWeekJson);
+    const streak = computeStreaks(
+      habitLogs.map((log) => new Date(log.date)),
+      daysOfWeek,
+      now
+    );
+    return { habit, todayCompletedCount: todayLog?.completedCount ?? 0, streak };
+  });
 }
 
 /* -------------------------------------------------------------------------- */
