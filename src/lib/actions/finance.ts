@@ -70,7 +70,7 @@ export async function updateCategoryAction(
   _prev: CategoryActionResult | null,
   formData: FormData
 ): Promise<CategoryActionResult> {
-  await requireWorkspace();
+  const { workspace } = await requireWorkspace();
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "Missing category." };
 
@@ -82,7 +82,8 @@ export async function updateCategoryAction(
   if (!parsed.success) return { error: firstIssueMessage(parsed.error, "Please check your details.") };
 
   try {
-    const category = await financeService.updateCategory(id, parsed.data);
+    const category = await financeService.updateCategory(workspace.id, id, parsed.data);
+    if (!category) return { error: "Category not found." };
     revalidateFinance();
     return { success: true, category };
   } catch (error) {
@@ -94,8 +95,8 @@ export async function updateCategoryAction(
 }
 
 export async function deleteCategoryAction(id: string): Promise<ActionResult> {
-  await requireWorkspace();
-  await financeService.deleteCategory(id);
+  const { workspace } = await requireWorkspace();
+  await financeService.deleteCategory(workspace.id, id);
   revalidateFinance();
   return { success: true };
 }
@@ -142,7 +143,7 @@ export async function updateTransactionAction(
   _prev: ActionResult | null,
   formData: FormData
 ): Promise<ActionResult> {
-  await requireWorkspace();
+  const { workspace } = await requireWorkspace();
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "Missing transaction." };
 
@@ -158,7 +159,7 @@ export async function updateTransactionAction(
   const occurredAt = new Date(parsed.data.occurredAt);
   if (Number.isNaN(occurredAt.getTime())) return { error: "Enter a valid date." };
 
-  await financeService.updateTransaction(id, {
+  await financeService.updateTransaction(workspace.id, id, {
     type: parsed.data.type,
     amountCents: parsed.data.amountCents,
     categoryId: parsed.data.categoryId,
@@ -170,8 +171,8 @@ export async function updateTransactionAction(
 }
 
 export async function deleteTransactionAction(id: string): Promise<ActionResult> {
-  await requireWorkspace();
-  await financeService.deleteTransaction(id);
+  const { workspace } = await requireWorkspace();
+  await financeService.deleteTransaction(workspace.id, id);
   revalidateFinance();
   return { success: true };
 }
@@ -202,7 +203,7 @@ export async function createBudgetAction(_prev: ActionResult | null, formData: F
 }
 
 export async function updateBudgetAction(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
-  await requireWorkspace();
+  const { workspace } = await requireWorkspace();
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "Missing budget." };
 
@@ -211,14 +212,14 @@ export async function updateBudgetAction(_prev: ActionResult | null, formData: F
   });
   if (!parsed.success) return { error: firstIssueMessage(parsed.error, "Please check your details.") };
 
-  await financeService.updateBudget(id, parsed.data);
+  await financeService.updateBudget(workspace.id, id, parsed.data);
   revalidateFinance();
   return { success: true };
 }
 
 export async function deleteBudgetAction(id: string): Promise<ActionResult> {
-  await requireWorkspace();
-  await financeService.deleteBudget(id);
+  const { workspace } = await requireWorkspace();
+  await financeService.deleteBudget(workspace.id, id);
   revalidateFinance();
   return { success: true };
 }
@@ -256,7 +257,7 @@ export async function updateRecurringBillAction(
   _prev: ActionResult | null,
   formData: FormData
 ): Promise<ActionResult> {
-  await requireWorkspace();
+  const { workspace } = await requireWorkspace();
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "Missing bill." };
 
@@ -274,21 +275,21 @@ export async function updateRecurringBillAction(
   const nextDueDate = new Date(parsed.data.nextDueDate);
   if (Number.isNaN(nextDueDate.getTime())) return { error: "Enter a valid due date." };
 
-  await financeService.updateRecurringBill(id, { ...parsed.data, nextDueDate });
+  await financeService.updateRecurringBill(workspace.id, id, { ...parsed.data, nextDueDate });
   revalidateFinance();
   return { success: true };
 }
 
 export async function deleteRecurringBillAction(id: string): Promise<ActionResult> {
-  await requireWorkspace();
-  await financeService.deleteRecurringBill(id);
+  const { workspace } = await requireWorkspace();
+  await financeService.deleteRecurringBill(workspace.id, id);
   revalidateFinance();
   return { success: true };
 }
 
 export async function setRecurringBillAutoPayAction(id: string, autoPay: boolean): Promise<ActionResult> {
-  await requireWorkspace();
-  await financeService.setRecurringBillAutoPay(id, autoPay);
+  const { workspace } = await requireWorkspace();
+  await financeService.setRecurringBillAutoPay(workspace.id, id, autoPay);
   revalidateFinance();
   return { success: true };
 }
@@ -332,7 +333,7 @@ export async function updateSavingsGoalAction(
   _prev: ActionResult | null,
   formData: FormData
 ): Promise<ActionResult> {
-  await requireWorkspace();
+  const { workspace } = await requireWorkspace();
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "Missing savings goal." };
 
@@ -351,7 +352,7 @@ export async function updateSavingsGoalAction(
     if (Number.isNaN(targetDate.getTime())) return { error: "Enter a valid target date." };
   }
 
-  await financeService.updateSavingsGoal(id, {
+  await financeService.updateSavingsGoal(workspace.id, id, {
     name: parsed.data.name,
     targetAmountCents: parsed.data.targetAmountCents,
     targetDate,
@@ -362,8 +363,8 @@ export async function updateSavingsGoalAction(
 }
 
 export async function deleteSavingsGoalAction(id: string): Promise<ActionResult> {
-  await requireWorkspace();
-  await financeService.deleteSavingsGoal(id);
+  const { workspace } = await requireWorkspace();
+  await financeService.deleteSavingsGoal(workspace.id, id);
   revalidateFinance();
   return { success: true };
 }
@@ -372,7 +373,7 @@ export async function contributeSavingsGoalAction(
   _prev: ActionResult | null,
   formData: FormData
 ): Promise<ActionResult> {
-  await requireWorkspace();
+  const { workspace } = await requireWorkspace();
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "Missing savings goal." };
 
@@ -381,7 +382,7 @@ export async function contributeSavingsGoalAction(
   });
   if (!parsed.success) return { error: firstIssueMessage(parsed.error, "Enter a valid amount.") };
 
-  await financeService.contributeSavingsGoal(id, parsed.data.amountCents);
+  await financeService.contributeSavingsGoal(workspace.id, id, parsed.data.amountCents);
   revalidateFinance();
   return { success: true };
 }

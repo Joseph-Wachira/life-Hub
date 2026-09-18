@@ -18,12 +18,14 @@ export async function createCategory(workspaceId: string, data: CategoryInput) {
   return db.category.create({ data: { workspaceId, ...data } });
 }
 
-export async function updateCategory(id: string, data: Partial<CategoryInput>) {
+export async function updateCategory(workspaceId: string, id: string, data: Partial<CategoryInput>) {
+  const existing = await db.category.findFirst({ where: { id, workspaceId }, select: { id: true } });
+  if (!existing) return null;
   return db.category.update({ where: { id }, data });
 }
 
-export async function deleteCategory(id: string) {
-  return db.category.delete({ where: { id } });
+export async function deleteCategory(workspaceId: string, id: string) {
+  return db.category.deleteMany({ where: { id, workspaceId } });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -71,12 +73,12 @@ export async function createTransaction(workspaceId: string, data: TransactionIn
   return db.transaction.create({ data: { workspaceId, ...data } });
 }
 
-export async function updateTransaction(id: string, data: Partial<TransactionInput>) {
-  return db.transaction.update({ where: { id }, data });
+export async function updateTransaction(workspaceId: string, id: string, data: Partial<TransactionInput>) {
+  return db.transaction.updateMany({ where: { id, workspaceId }, data });
 }
 
-export async function deleteTransaction(id: string) {
-  return db.transaction.delete({ where: { id } });
+export async function deleteTransaction(workspaceId: string, id: string) {
+  return db.transaction.deleteMany({ where: { id, workspaceId } });
 }
 
 /** Total income/expense across a date range, scoped to the workspace. */
@@ -164,12 +166,12 @@ export async function createBudget(workspaceId: string, data: BudgetInput) {
   return db.budget.create({ data: { workspaceId, ...data } });
 }
 
-export async function updateBudget(id: string, data: { monthlyLimitCents: number }) {
-  return db.budget.update({ where: { id }, data });
+export async function updateBudget(workspaceId: string, id: string, data: { monthlyLimitCents: number }) {
+  return db.budget.updateMany({ where: { id, workspaceId }, data });
 }
 
-export async function deleteBudget(id: string) {
-  return db.budget.delete({ where: { id } });
+export async function deleteBudget(workspaceId: string, id: string) {
+  return db.budget.deleteMany({ where: { id, workspaceId } });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -198,16 +200,20 @@ export async function createRecurringBill(workspaceId: string, data: RecurringBi
   return db.recurringBill.create({ data: { workspaceId, ...data } });
 }
 
-export async function updateRecurringBill(id: string, data: Partial<RecurringBillInput>) {
-  return db.recurringBill.update({ where: { id }, data });
+export async function updateRecurringBill(
+  workspaceId: string,
+  id: string,
+  data: Partial<RecurringBillInput>
+) {
+  return db.recurringBill.updateMany({ where: { id, workspaceId }, data });
 }
 
-export async function deleteRecurringBill(id: string) {
-  return db.recurringBill.delete({ where: { id } });
+export async function deleteRecurringBill(workspaceId: string, id: string) {
+  return db.recurringBill.deleteMany({ where: { id, workspaceId } });
 }
 
-export async function setRecurringBillAutoPay(id: string, autoPay: boolean) {
-  return db.recurringBill.update({ where: { id }, data: { autoPay } });
+export async function setRecurringBillAutoPay(workspaceId: string, id: string, autoPay: boolean) {
+  return db.recurringBill.updateMany({ where: { id, workspaceId }, data: { autoPay } });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -229,18 +235,22 @@ export async function createSavingsGoal(workspaceId: string, data: SavingsGoalIn
   return db.savingsGoal.create({ data: { workspaceId, ...data } });
 }
 
-export async function updateSavingsGoal(id: string, data: Partial<SavingsGoalInput>) {
-  return db.savingsGoal.update({ where: { id }, data });
+export async function updateSavingsGoal(
+  workspaceId: string,
+  id: string,
+  data: Partial<SavingsGoalInput>
+) {
+  return db.savingsGoal.updateMany({ where: { id, workspaceId }, data });
 }
 
-export async function deleteSavingsGoal(id: string) {
-  return db.savingsGoal.delete({ where: { id } });
+export async function deleteSavingsGoal(workspaceId: string, id: string) {
+  return db.savingsGoal.deleteMany({ where: { id, workspaceId } });
 }
 
-export async function contributeSavingsGoal(id: string, amountCents: number) {
-  const goal = await db.savingsGoal.findUniqueOrThrow({ where: { id } });
-  return db.savingsGoal.update({
-    where: { id },
+export async function contributeSavingsGoal(workspaceId: string, id: string, amountCents: number) {
+  const goal = await db.savingsGoal.findFirstOrThrow({ where: { id, workspaceId } });
+  return db.savingsGoal.updateMany({
+    where: { id, workspaceId },
     data: { currentAmountCents: goal.currentAmountCents + amountCents },
   });
 }
