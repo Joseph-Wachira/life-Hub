@@ -26,16 +26,17 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts          Account[]
-  sessions          Session[]
-  workspaces        Workspace[]
-  onboardingProfile OnboardingProfile?
-  settings          UserSettings?
-  notificationPref  NotificationPreference?
-  focusSessions     FocusSession[]
-  notifications     Notification[]
-  mobileSessions    MobileSession[]
-  pushTokens        PushToken[]
+  accounts            Account[]
+  sessions            Session[]
+  workspaces          Workspace[]
+  onboardingProfile   OnboardingProfile?
+  settings            UserSettings?
+  notificationPref    NotificationPreference?
+  focusSessions       FocusSession[]
+  notifications       Notification[]
+  mobileSessions      MobileSession[]
+  pushTokens          PushToken[]
+  passwordResetTokens PasswordResetToken[]
 }
 
 model Account {
@@ -72,6 +73,34 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+// A "forgot password" link's token. Only the SHA-256 hash is ever persisted
+// (mirrors MobileSession.refreshTokenHash), single-use (usedAt) and
+// short-lived (expiresAt), so a leaked row can't be replayed to take over
+// the account. See src/lib/services/password-reset.ts.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Fixed-window request counter backing src/lib/rate-limit.ts. Deliberately
+// database-backed rather than an in-memory map, for the same reason every
+// other piece of server state here lives in Postgres/SQLite: it has to hold
+// across multiple serverless instances sharing one database, not just
+// within a single process.
+model RateLimitAttempt {
+  key     String   @id
+  count   Int      @default(0)
+  resetAt DateTime
 }
 
 // ---------------------------------------------------------------------------
@@ -157,12 +186,12 @@ model MobileSession {
 // for the (untested-against-a-real-device) send path and the mobile README
 // section for exactly what "prepared but unverified" means here.
 model PushToken {
-  id        String   @id @default(cuid())
-  userId    String
-  token     String   @unique
-  platform  String // "ios" | "android"
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  platform   String // "ios" | "android"
   deviceName String?
-  createdAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
