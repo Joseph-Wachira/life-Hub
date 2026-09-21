@@ -20,7 +20,12 @@ describe("mobile access tokens", () => {
   it("rejects a token with a tampered signature", async () => {
     const { token } = await signAccessToken({ userId: "user_1", email: "demo@lifehub.app" });
     const [header, payload, signature] = token.split(".");
-    const flippedSignature = signature.slice(0, -1) + (signature.endsWith("A") ? "B" : "A");
+    // Flip the FIRST character, not the last: base64url's final group of a
+    // 256-bit HMAC carries 2 unused padding bits, so flipping the last
+    // character can occasionally decode to the exact same signature bytes
+    // and make this test flake. Every earlier character fully encodes real
+    // bits, so a flip there is guaranteed to change the decoded signature.
+    const flippedSignature = (signature[0] === "A" ? "B" : "A") + signature.slice(1);
     const tampered = `${header}.${payload}.${flippedSignature}`;
 
     await expect(verifyAccessToken(tampered)).rejects.toBeInstanceOf(InvalidAccessTokenError);

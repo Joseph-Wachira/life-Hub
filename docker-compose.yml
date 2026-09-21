@@ -1,0 +1,22 @@
+# Local Postgres for testing the SQLite -> Postgres swap described in the
+# README's "Deployment" section, before pointing a real production
+# DATABASE_URL at a hosted instance (Vercel Postgres, Neon, Supabase, RDS...).
+#
+# Usage:
+#   docker compose up -d
+#   DATABASE_URL="postgresql://lifehub:lifehub@localhost:5435/lifehub" npx prisma migrate deploy
+#   DATABASE_URL="postgresql://lifehub:lifehub@localhost:5435/lifehub" npm run db:seed
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lifehub
+      POSTGRES_PASSWORD: lifehub
+      POSTGRES_DB: lifehub
+    ports:
+      - "5435:5432"
+    volumes:
+      - lifehub-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  lifehub-postgres-data:
