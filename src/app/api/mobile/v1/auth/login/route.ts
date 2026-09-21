@@ -7,7 +7,9 @@ import { listWorkspaces } from "@/lib/services/workspace";
 import { signAccessToken } from "@/lib/mobile/jwt";
 import { issueRefreshToken } from "@/lib/mobile/refresh-tokens";
 import { toMobileUser, toMobileWorkspace } from "@/lib/mobile/dto";
-import { mobileJson, withMobileErrors, badRequest, unauthorized } from "@/lib/mobile/http";
+import { extractClientIp } from "@/lib/request-ip";
+import { assertWithinRateLimit, RateLimitError, formatRetryAfter } from "@/lib/rate-limit";
+import { mobileJson, withMobileErrors, badRequest, unauthorized, tooManyRequests } from "@/lib/mobile/http";
 
 export const POST = withMobileErrors(async (req: NextRequest) => {
   const body = await req.json().catch(() => null);
@@ -17,6 +19,18 @@ export const POST = withMobileErrors(async (req: NextRequest) => {
   }
 
   const { email, password } = parsed.data;
+
+  try {
+    await assertWithinRateLimit(`login:email:${email}`, { limit: 10, windowMs: 15 * 60 * 1000 });
+    const ip = extractClientIp((name) => req.headers.get(name));
+    await assertWithinRateLimit(`login:ip:${ip}`, { limit: 30, windowMs: 15 * 60 * 1000 });
+  } catch (error) {
+    if (error instanceof RateLimitError) {
+      throw tooManyRequests(`Too many attempts. Try again in ${formatRetryAfter(error.retryAfterSeconds)}.`);
+    }
+    throw error;
+  }
+
   const user = await db.user.findUnique({ where: { email } });
   if (!user?.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
     throw unauthorized("Invalid email or password.");

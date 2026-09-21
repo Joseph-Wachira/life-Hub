@@ -109,7 +109,7 @@ export async function deleteTaskAction(taskId: string): Promise<ActionResult> {
   const existing = await db.task.findFirst({ where: { id: taskId, workspaceId: workspace.id } });
   if (!existing) return { error: "Task not found." };
 
-  await deleteTask(taskId);
+  await deleteTask(workspace.id, taskId);
   revalidatePath("/tasks");
   revalidatePath("/projects");
   return { success: true };
@@ -124,7 +124,7 @@ export async function moveTaskAction(taskId: string, status: TaskStatus, positio
   const existing = await db.task.findFirst({ where: { id: taskId, workspaceId: workspace.id } });
   if (!existing) return { error: "Task not found." };
 
-  await moveTask(taskId, parsedStatus.data, position);
+  await moveTask(workspace.id, taskId, parsedStatus.data, position);
   revalidatePath("/tasks");
   revalidatePath("/projects");
   return { success: true };
@@ -138,7 +138,7 @@ export async function setTaskStatusAction(taskId: string, status: TaskStatus): P
   const existing = await db.task.findFirst({ where: { id: taskId, workspaceId: workspace.id } });
   if (!existing) return { error: "Task not found." };
 
-  await setTaskStatus(taskId, parsedStatus.data);
+  await setTaskStatus(workspace.id, taskId, parsedStatus.data);
   revalidatePath("/tasks");
   revalidatePath("/projects");
   return { success: true };

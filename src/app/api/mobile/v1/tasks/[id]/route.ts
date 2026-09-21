@@ -77,6 +77,6 @@ export const DELETE = withMobileErrors(async (req: NextRequest, { params }: Para
   const existing = await getTask(id, parsed.data.workspaceId);
   if (!existing) throw notFound("Task not found.");
 
-  await deleteTask(id);
+  await deleteTask(parsed.data.workspaceId, id);
   return mobileJson({ ok: true });
 });

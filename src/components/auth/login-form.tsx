@@ -32,7 +32,7 @@ export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
           <Label htmlFor="password">Password</Label>
-          <Link href="#" className="text-xs text-[var(--brand)] hover:underline">
+          <Link href="/forgot-password" className="text-xs text-[var(--brand)] hover:underline">
             Forgot password?
           </Link>
         </div>

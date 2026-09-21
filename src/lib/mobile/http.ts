@@ -21,6 +21,7 @@ export const forbidden = (message = "You don't have access to this resource.") =
 export const notFound = (message = "Not found.") => new MobileApiError(404, "NOT_FOUND", message);
 export const badRequest = (message: string, fieldErrors?: Record<string, string[]>) =>
   new MobileApiError(400, "BAD_REQUEST", message, fieldErrors);
+export const tooManyRequests = (message: string) => new MobileApiError(429, "RATE_LIMITED", message);
 
 /** Every successful mobile API response is `{ data }` — see AGENTS.md-style contract note in src/app/api/mobile/v1/README.md. */
 export function mobileJson<T>(data: T, init?: number | ResponseInit) {

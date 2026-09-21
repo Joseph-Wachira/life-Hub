@@ -126,8 +126,8 @@ export async function createTask(data: TaskWriteData & { position: number }) {
 }
 
 export async function updateTask(id: string, data: TaskWriteData) {
-  const existing = await db.task.findUnique({
-    where: { id },
+  const existing = await db.task.findFirst({
+    where: { id, workspaceId: data.workspaceId },
     include: { subtasks: true, attachments: true },
   });
   if (!existing) throw new Error("Task not found");
@@ -209,33 +209,35 @@ export async function updateTask(id: string, data: TaskWriteData) {
 }
 
 /** Used by drag-and-drop: moves a task between/within columns, updating status + position. */
-export async function moveTask(id: string, status: TaskStatus, position: number) {
-  const existing = await db.task.findUnique({ where: { id }, select: { status: true, completedAt: true } });
+export async function moveTask(workspaceId: string, id: string, status: TaskStatus, position: number) {
+  const existing = await db.task.findFirst({ where: { id, workspaceId }, select: { status: true, completedAt: true } });
+  if (!existing) return null;
   const willBeDone = status === "DONE";
   return db.task.update({
     where: { id },
     data: {
       status,
       position,
-      completedAt: willBeDone ? (existing?.status === "DONE" ? existing.completedAt : new Date()) : null,
+      completedAt: willBeDone ? (existing.status === "DONE" ? existing.completedAt : new Date()) : null,
     },
   });
 }
 
-export async function setTaskStatus(id: string, status: TaskStatus) {
-  const existing = await db.task.findUnique({ where: { id }, select: { status: true, completedAt: true } });
+export async function setTaskStatus(workspaceId: string, id: string, status: TaskStatus) {
+  const existing = await db.task.findFirst({ where: { id, workspaceId }, select: { status: true, completedAt: true } });
+  if (!existing) return null;
   const willBeDone = status === "DONE";
   return db.task.update({
     where: { id },
     data: {
       status,
-      completedAt: willBeDone ? (existing?.status === "DONE" ? existing.completedAt : new Date()) : null,
+      completedAt: willBeDone ? (existing.status === "DONE" ? existing.completedAt : new Date()) : null,
     },
   });
 }
 
-export async function deleteTask(id: string) {
-  return db.task.delete({ where: { id } });
+export async function deleteTask(workspaceId: string, id: string) {
+  return db.task.deleteMany({ where: { id, workspaceId } });
 }
 
 /** Append-to-end position for a new task in a given status column. */
